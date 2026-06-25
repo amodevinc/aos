@@ -34,8 +34,10 @@ function resolveTsxPath(projectPath: string): string {
 
 export function writeWrapperScript(projectPath: string): void {
   const tsx = resolveTsxPath(projectPath)
+  const nodeBin = path.dirname(process.execPath)
   const script = `#!/bin/bash
 set -euo pipefail
+export PATH=${JSON.stringify(nodeBin)}:"$PATH"
 cd ${JSON.stringify(projectPath)}
 exec ${JSON.stringify(tsx)} scripts/aos-sync.ts
 `

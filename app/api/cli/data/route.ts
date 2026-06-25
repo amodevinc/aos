@@ -57,6 +57,11 @@ export async function GET(req: Request) {
         const data = await s.exportAll()
         return Response.json({ data, exportedAt: new Date().toISOString() })
       }
+      case 'capture_sessions': {
+        const limit = Number(url.searchParams.get('limit') ?? 20)
+        const sessions = await s.captureSessionStorage.getRecent(limit)
+        return Response.json({ sessions })
+      }
       default:
         return Response.json({ error: 'Unknown resource. Use: daily, goals, decisions, weekly, compass, contacts, export' }, { status: 400 })
     }
