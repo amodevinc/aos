@@ -1,53 +1,66 @@
-import Anthropic from '@anthropic-ai/sdk'
 import { NextRequest } from 'next/server'
 import type { MessageParam } from '@anthropic-ai/sdk/resources/messages'
-
-// Thin proxy: receives the API key from the client request body (key lives in
-// browser localStorage, not in server env), makes the Anthropic call server-side
-// to avoid CORS restrictions, and streams the response back.
+import Anthropic from '@anthropic-ai/sdk'
+import { requireSessionUser, resolveAnthropicKey } from '@/lib/security/auth'
+import { checkRateLimit, clientIp, rateLimitResponse } from '@/lib/security/rate-limit'
 
 export const runtime = 'nodejs'
 
 export async function POST(req: NextRequest) {
-  const { apiKey, messages, system, maxTokens = 2048 } = await req.json() as {
-    apiKey: string
-    messages: MessageParam[]
-    system: string
-    maxTokens?: number
-  }
+  const rl = checkRateLimit(`ai:${clientIp(req)}`, 30, 60_000)
+  if (!rl.ok) return rateLimitResponse(rl.retryAfterSec)
 
-  if (!apiKey?.startsWith('sk-ant-')) {
-    return new Response(
-      JSON.stringify({ error: 'Invalid or missing Anthropic API key.' }),
-      { status: 400, headers: { 'Content-Type': 'application/json' } }
-    )
-  }
+  const session = await requireSessionUser()
+  if ('error' in session) return session.error
 
   try {
-    const client = new Anthropic({ apiKey })
+    const { apiKey, messages, system, maxTokens = 2048 } = await req.json() as {
+      apiKey?: string
+      messages: MessageParam[]
+      system: string
+      maxTokens?: number
+    }
 
-    const stream = client.messages.stream({
+    const resolvedKey = resolveAnthropicKey(apiKey)
+    if (!resolvedKey) {
+      return Response.json(
+        { error: 'Anthropic API key not configured. Add it in Settings or set ANTHROPIC_API_KEY on the server.' },
+        { status: 400 }
+      )
+    }
+
+    const client = new Anthropic({ apiKey: resolvedKey })
+
+    // `await` here makes the HTTP request eagerly and waits for response headers.
+    // Auth errors, invalid params, and network failures are thrown before we commit
+    // to a 200 streaming response — so the catch block below handles them correctly.
+    // This is the key difference vs client.messages.stream() which fires asynchronously
+    // inside a ReadableStream where errors escape the try/catch.
+    const response = await client.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: maxTokens,
       system,
       messages,
+      stream: true,
     })
 
+    const enc = new TextEncoder()
     const readable = new ReadableStream({
       async start(controller) {
-        const enc = new TextEncoder()
-        for await (const chunk of stream) {
-          if (
-            chunk.type === 'content_block_delta' &&
-            chunk.delta.type === 'text_delta'
-          ) {
-            controller.enqueue(enc.encode(chunk.delta.text))
+        try {
+          for await (const chunk of response) {
+            if (
+              chunk.type === 'content_block_delta' &&
+              chunk.delta.type === 'text_delta'
+            ) {
+              controller.enqueue(enc.encode(chunk.delta.text))
+            }
           }
+          controller.close()
+        } catch (err) {
+          // Mid-stream error — can't change status code but signal the client
+          try { controller.error(err) } catch { /* already closed */ }
         }
-        controller.close()
-      },
-      cancel() {
-        stream.abort()
       },
     })
 
@@ -60,9 +73,6 @@ export async function POST(req: NextRequest) {
     })
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Unknown error'
-    return new Response(
-      JSON.stringify({ error: msg }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } }
-    )
+    return Response.json({ error: msg }, { status: 500 })
   }
 }

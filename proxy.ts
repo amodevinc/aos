@@ -28,9 +28,12 @@ export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
   const isAuthPath = pathname.startsWith('/login') || pathname.startsWith('/auth')
 
-  // Redirect unauthenticated users to login
+  // Redirect unauthenticated users to login (preserve return path)
   if (!user && !isAuthPath) {
-    return NextResponse.redirect(new URL('/login', request.url))
+    const login = new URL('/login', request.url)
+    const returnPath = `${pathname}${request.nextUrl.search}`
+    if (returnPath !== '/') login.searchParams.set('next', returnPath)
+    return NextResponse.redirect(login)
   }
 
   // Redirect authenticated users away from login

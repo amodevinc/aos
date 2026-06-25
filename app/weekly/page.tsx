@@ -8,12 +8,15 @@ import { WeeklyReviewForm } from '@/components/weekly/WeeklyReviewForm'
 import { weeklyStorage, dailyStorage } from '@/lib/storage'
 import { computeWeeklyScore, computePillarScores } from '@/lib/scoring/weekly'
 import { getWeekRange, scoreColor, PILLAR_META, PILLARS, cn } from '@/lib/utils'
+import { useToast } from '@/lib/hooks/useToast'
+import { parseError } from '@/lib/utils/errors'
 import type { WeeklyReview } from '@/types'
 
 export default function WeeklyPage() {
   const [reviews, setReviews] = useState<WeeklyReview[]>([])
   const [showForm, setShowForm] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const toast = useToast()
 
   const [weeklyContext, setWeeklyContext] = useState({
     pillarScores: { health: 0, capability: 0, network: 0, wealth: 0, mission: 0 },
@@ -21,22 +24,30 @@ export default function WeeklyPage() {
   })
 
   const load = async () => {
-    const all = await weeklyStorage.getAll()
-    setReviews([...all].sort((a, b) => b.weekStart.localeCompare(a.weekStart)))
+    try {
+      const all = await weeklyStorage.getAll()
+      setReviews([...all].sort((a, b) => b.weekStart.localeCompare(a.weekStart)))
+    } catch (err) {
+      toast.error('Failed to load weekly reviews', parseError(err))
+    }
   }
 
   useEffect(() => {
     load()
     async function loadWeekContext() {
-      const { start: s, end: e } = getWeekRange()
-      const allEntries = await dailyStorage.getAll()
-      const weekEntries = allEntries.filter((en) => en.date >= s && en.date <= e)
-      const pillarScores = computePillarScores(weekEntries)
-      const scored = weekEntries.filter((en) => en.alignmentScore !== undefined)
-      const avg = scored.length > 0
-        ? Math.round(scored.reduce((a, en) => a + (en.alignmentScore ?? 0), 0) / scored.length)
-        : 0
-      setWeeklyContext({ pillarScores, avgAlignment: avg })
+      try {
+        const { start: s, end: e } = getWeekRange()
+        const allEntries = await dailyStorage.getAll()
+        const weekEntries = allEntries.filter((en) => en.date >= s && en.date <= e)
+        const pillarScores = computePillarScores(weekEntries)
+        const scored = weekEntries.filter((en) => en.alignmentScore !== undefined)
+        const avg = scored.length > 0
+          ? Math.round(scored.reduce((a, en) => a + (en.alignmentScore ?? 0), 0) / scored.length)
+          : 0
+        setWeeklyContext({ pillarScores, avgAlignment: avg })
+      } catch {
+        // non-critical — pillar scores just show 0
+      }
     }
     loadWeekContext()
   }, [])
@@ -47,8 +58,14 @@ export default function WeeklyPage() {
   const precomputedAvg = weeklyContext.avgAlignment
 
   const handleSave = async (review: WeeklyReview) => {
-    await weeklyStorage.save(review)
-    load()
+    try {
+      await weeklyStorage.save(review)
+      load()
+      toast.success('Weekly review saved')
+    } catch (err) {
+      toast.error('Failed to save review', parseError(err))
+      return
+    }
     setShowForm(false)
   }
 

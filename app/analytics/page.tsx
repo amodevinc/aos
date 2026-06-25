@@ -8,6 +8,8 @@ import {
 import { PageHeader } from '@/components/layout/PageHeader'
 import { StatCard } from '@/components/layout/StatCard'
 import { dailyStorage, weeklyStorage, decisionStorage, goalStorage } from '@/lib/storage'
+import { useToast } from '@/lib/hooks/useToast'
+import { parseError } from '@/lib/utils/errors'
 import { computeStreak, rollingAverage } from '@/lib/scoring/daily'
 import { computePillarScores } from '@/lib/scoring/weekly'
 import {
@@ -32,6 +34,7 @@ const CHART_TOOLTIP_STYLE = {
 }
 
 export default function AnalyticsPage() {
+  const toast = useToast()
   const [dailyData, setDailyData] = useState<Array<{ date: string; score: number }>>([])
   const [weeklyData, setWeeklyData] = useState<Array<{ week: string; score: number; health: number; capability: number; network: number; wealth: number; mission: number }>>([])
   const [decisionData, setDecisionData] = useState<Array<{ name: string; score: number }>>([])
@@ -46,6 +49,7 @@ export default function AnalyticsPage() {
 
   useEffect(() => {
     async function load() {
+      try {
       const [entries, reviews, decisions, goals] = await Promise.all([
         dailyStorage.getAll(),
         weeklyStorage.getAll(),
@@ -92,6 +96,9 @@ export default function AnalyticsPage() {
           ? Math.round(decScores.reduce((a, b) => a + b, 0) / decScores.length)
           : 0,
       })
+      } catch (err) {
+        toast.error('Failed to load analytics', parseError(err))
+      }
     }
     load()
   }, [])

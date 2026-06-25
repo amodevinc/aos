@@ -14,10 +14,12 @@ import {
   Zap,
   Brain,
   Users,
+  Mic,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const NAV = [
+  { href: '/capture', label: 'Capture', icon: Mic },
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/daily', label: 'Daily', icon: CalendarDays },
   { href: '/goals', label: 'Goals', icon: Target },

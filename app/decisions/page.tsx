@@ -8,29 +8,45 @@ import { AIDecisionAnalysis } from '@/components/decisions/AIDecisionAnalysis'
 import { decisionStorage } from '@/lib/storage'
 import { RECOMMENDATION_META } from '@/lib/scoring/decision'
 import { scoreColor, formatDate, cn, truncate } from '@/lib/utils'
+import { useToast } from '@/lib/hooks/useToast'
+import { parseError } from '@/lib/utils/errors'
 import type { Decision } from '@/types'
 
 export default function DecisionsPage() {
   const [decisions, setDecisions] = useState<Decision[]>([])
   const [showForm, setShowForm] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const toast = useToast()
 
   const load = async () => {
-    const all = await decisionStorage.getAll()
-    setDecisions([...all].sort((a, b) => b.createdAt.localeCompare(a.createdAt)))
+    try {
+      const all = await decisionStorage.getAll()
+      setDecisions([...all].sort((a, b) => b.createdAt.localeCompare(a.createdAt)))
+    } catch (err) {
+      toast.error('Failed to load decisions', parseError(err))
+    }
   }
   useEffect(() => { load() }, [])
 
   const handleSave = async (d: Decision) => {
-    await decisionStorage.save(d)
-    load()
-    setShowForm(false)
+    try {
+      await decisionStorage.save(d)
+      load()
+      setShowForm(false)
+      toast.success('Decision logged')
+    } catch (err) {
+      toast.error('Failed to save decision', parseError(err))
+    }
   }
 
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this decision?')) return
-    await decisionStorage.delete(id)
-    load()
+    try {
+      await decisionStorage.delete(id)
+      load()
+    } catch (err) {
+      toast.error('Failed to delete decision', parseError(err))
+    }
   }
 
   return (
@@ -183,9 +199,13 @@ export default function DecisionsPage() {
                     <textarea
                       defaultValue={d.outcome ?? ''}
                       onBlur={async (e) => {
-                        const updated = { ...d, outcome: e.target.value, updatedAt: new Date().toISOString() }
-                        await decisionStorage.save(updated)
-                        load()
+                        try {
+                          const updated = { ...d, outcome: e.target.value, updatedAt: new Date().toISOString() }
+                          await decisionStorage.save(updated)
+                          load()
+                        } catch (err) {
+                          toast.error('Failed to save outcome', parseError(err))
+                        }
                       }}
                       placeholder="How did this play out…"
                       rows={2}

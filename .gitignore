@@ -32,9 +32,20 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.local.example
+
+# vercel pulled env (contains secrets)
+.env.vercel
 
 # vercel
 .vercel
+
+# local MCP config (machine-specific cwd)
+.mcp.json
+
+# agent / IDE scratch (not part of the app)
+.claude/
+.cursor/
 
 # typescript
 *.tsbuildinfo

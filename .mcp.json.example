@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "aos": {
+      "command": "npm",
+      "args": ["run", "mcp:aos"],
+      "cwd": "/Users/alainmorris/dev/ai/life-system"
+    }
+  }
+}

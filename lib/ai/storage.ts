@@ -1,72 +1,79 @@
 'use client'
 
 import type { MessageParam } from '@anthropic-ai/sdk/resources/messages'
+import { createClient } from '@/lib/supabase/client'
 
-const KEYS = {
+const LOCAL_KEYS = {
   API_KEY: 'aos:ai:apikey',
-  CONVERSATIONS: 'aos:ai:conversations',
   INSIGHTS: 'aos:ai:insights',
   INSIGHTS_TS: 'aos:ai:insights_ts',
 } as const
 
-function read<T>(key: string, fallback: T): T {
-  if (typeof window === 'undefined') return fallback
-  try {
-    const raw = localStorage.getItem(key)
-    return raw ? (JSON.parse(raw) as T) : fallback
-  } catch {
-    return fallback
-  }
-}
-
-function write<T>(key: string, val: T): void {
-  if (typeof window === 'undefined') return
-  localStorage.setItem(key, JSON.stringify(val))
-}
-
-// ─── API Key ─────────────────────────────────────────────────────────────────
+// ─── API Key (localStorage only — never leaves browser) ───────────────────────
 
 export const apiKeyStorage = {
   get: (): string => {
     if (typeof window === 'undefined') return ''
-    return localStorage.getItem(KEYS.API_KEY) ?? ''
+    return localStorage.getItem(LOCAL_KEYS.API_KEY) ?? ''
   },
   set: (key: string): void => {
     if (typeof window === 'undefined') return
-    localStorage.setItem(KEYS.API_KEY, key)
+    localStorage.setItem(LOCAL_KEYS.API_KEY, key)
   },
   clear: (): void => {
     if (typeof window === 'undefined') return
-    localStorage.removeItem(KEYS.API_KEY)
+    localStorage.removeItem(LOCAL_KEYS.API_KEY)
   },
 }
 
-// ─── Conversation history ─────────────────────────────────────────────────────
-
-export interface Conversation {
-  id: string
-  messages: MessageParam[]
-  createdAt: string
-  updatedAt: string
-}
+// ─── Conversation (Supabase — syncs across devices) ───────────────────────────
+// One active conversation per user. Stored as JSONB messages array.
 
 export const conversationStorage = {
-  get: (): Conversation | null => read<Conversation | null>(KEYS.CONVERSATIONS, null),
-  save: (conv: Conversation): void => write(KEYS.CONVERSATIONS, conv),
-  clear: (): void => {
-    if (typeof window !== 'undefined') localStorage.removeItem(KEYS.CONVERSATIONS)
+  get: async (): Promise<MessageParam[]> => {
+    const { data } = await createClient()
+      .from('coach_conversations')
+      .select('messages')
+      .maybeSingle()
+    return (data?.messages as MessageParam[]) ?? []
+  },
+
+  save: async (messages: MessageParam[]): Promise<void> => {
+    const { data: { user } } = await createClient().auth.getUser()
+    if (!user) return
+    await createClient().from('coach_conversations').upsert(
+      { user_id: user.id, messages, updated_at: new Date().toISOString() },
+      { onConflict: 'user_id' }
+    )
+  },
+
+  clear: async (): Promise<void> => {
+    const { data: { user } } = await createClient().auth.getUser()
+    if (!user) return
+    await createClient()
+      .from('coach_conversations')
+      .delete()
+      .eq('user_id', user.id)
   },
 }
 
-// ─── Cached AI Insights ───────────────────────────────────────────────────────
+// ─── Cached AI Insights (localStorage — per-device, cheap to regenerate) ──────
 
 export const insightsStorage = {
-  get: (): string[] => read<string[]>(KEYS.INSIGHTS, []),
-  getTimestamp: (): number => read<number>(KEYS.INSIGHTS_TS, 0),
-  save: (insights: string[]): void => {
-    write(KEYS.INSIGHTS, insights)
-    write(KEYS.INSIGHTS_TS, Date.now())
+  get: (): string[] => {
+    if (typeof window === 'undefined') return []
+    try {
+      return JSON.parse(localStorage.getItem(LOCAL_KEYS.INSIGHTS) ?? '[]') as string[]
+    } catch { return [] }
   },
-  // Insights older than 4 hours are considered stale
-  isStale: (): boolean => Date.now() - read<number>(KEYS.INSIGHTS_TS, 0) > 4 * 60 * 60 * 1000,
+  save: (insights: string[]): void => {
+    if (typeof window === 'undefined') return
+    localStorage.setItem(LOCAL_KEYS.INSIGHTS, JSON.stringify(insights))
+    localStorage.setItem(LOCAL_KEYS.INSIGHTS_TS, String(Date.now()))
+  },
+  isStale: (): boolean => {
+    if (typeof window === 'undefined') return true
+    const ts = Number(localStorage.getItem(LOCAL_KEYS.INSIGHTS_TS) ?? 0)
+    return Date.now() - ts > 4 * 60 * 60 * 1000
+  },
 }

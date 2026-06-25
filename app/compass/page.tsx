@@ -3,8 +3,40 @@
 import { useEffect, useState } from 'react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { compassStorage } from '@/lib/storage'
+import { useToast } from '@/lib/hooks/useToast'
+import { parseError } from '@/lib/utils/errors'
 import type { LifeCompass } from '@/types'
 import { cn } from '@/lib/utils'
+
+// Defined outside CompassPage so React treats it as a stable component type
+// across re-renders. Defining it inside would cause unmount/remount on every
+// keystroke, destroying focus.
+function TextBlock({
+  label,
+  value,
+  onChange,
+  placeholder,
+  rows = 3,
+}: {
+  label: string
+  value: string
+  onChange: (v: string) => void
+  placeholder: string
+  rows?: number
+}) {
+  return (
+    <div>
+      <label className="mb-1.5 block text-xs font-medium text-[#6b6b88]">{label}</label>
+      <textarea
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        rows={rows}
+        className="w-full resize-none rounded-lg border border-[#1e1e2a] bg-[#0a0a0c] px-3 py-2.5 text-sm text-[#e8e8f0] placeholder-[#3a3a55] outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/20"
+      />
+    </div>
+  )
+}
 
 // Tagline list editor for arrays like coreValues, personalRules, etc.
 function TaglistEditor({
@@ -82,9 +114,12 @@ const defaultCompass: LifeCompass = {
 export default function CompassPage() {
   const [compass, setCompass] = useState<LifeCompass>(defaultCompass)
   const [saved, setSaved] = useState(false)
+  const toast = useToast()
 
   useEffect(() => {
-    compassStorage.get().then(setCompass)
+    compassStorage.get()
+      .then(setCompass)
+      .catch((err) => toast.error('Failed to load compass', parseError(err)))
   }, [])
 
   const update = (key: keyof LifeCompass, value: string | string[]) => {
@@ -93,33 +128,14 @@ export default function CompassPage() {
   }
 
   const handleSave = async () => {
-    await compassStorage.save({ ...compass, updatedAt: new Date().toISOString() })
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
+    try {
+      await compassStorage.save({ ...compass, updatedAt: new Date().toISOString() })
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    } catch (err) {
+      toast.error('Failed to save compass', parseError(err))
+    }
   }
-
-  const TextBlock = ({
-    label,
-    field,
-    placeholder,
-    rows = 3,
-  }: {
-    label: string
-    field: keyof LifeCompass
-    placeholder: string
-    rows?: number
-  }) => (
-    <div>
-      <label className="mb-1.5 block text-xs font-medium text-[#6b6b88]">{label}</label>
-      <textarea
-        value={compass[field] as string}
-        onChange={(e) => update(field, e.target.value)}
-        placeholder={placeholder}
-        rows={rows}
-        className="w-full resize-none rounded-lg border border-[#1e1e2a] bg-[#0a0a0c] px-3 py-2.5 text-sm text-[#e8e8f0] placeholder-[#3a3a55] outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/20"
-      />
-    </div>
-  )
 
   return (
     <div>
@@ -150,25 +166,29 @@ export default function CompassPage() {
           <div className="space-y-4">
             <TextBlock
               label="Mission Statement"
-              field="missionStatement"
+              value={compass.missionStatement}
+              onChange={(v) => update('missionStatement', v)}
               placeholder="In one sentence, what is your purpose and who do you serve…"
               rows={2}
             />
             <TextBlock
               label="10-Year Vision"
-              field="tenYearVision"
+              value={compass.tenYearVision}
+              onChange={(v) => update('tenYearVision', v)}
               placeholder="Describe your life and impact a decade from now in vivid detail…"
               rows={4}
             />
             <TextBlock
               label="3-Year Mission"
-              field="threeYearMission"
+              value={compass.threeYearMission}
+              onChange={(v) => update('threeYearMission', v)}
               placeholder="What must be true in 3 years for you to be on track…"
               rows={3}
             />
             <TextBlock
               label="Current Season"
-              field="currentSeason"
+              value={compass.currentSeason}
+              onChange={(v) => update('currentSeason', v)}
               placeholder="What season of life are you in? What is this phase about…"
               rows={2}
             />
@@ -182,7 +202,8 @@ export default function CompassPage() {
           </h2>
           <TextBlock
             label="Identity Statement"
-            field="identityStatement"
+            value={compass.identityStatement}
+            onChange={(v) => update('identityStatement', v)}
             placeholder="I am the kind of person who…"
             rows={3}
           />

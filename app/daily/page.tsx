@@ -11,6 +11,8 @@ import { AlignmentRing } from '@/components/dashboard/AlignmentRing'
 
 import { dailyStorage } from '@/lib/storage'
 import { todayISO, generateId } from '@/lib/utils'
+import { useToast } from '@/lib/hooks/useToast'
+import { parseError } from '@/lib/utils/errors'
 import type { DailyEntry } from '@/types'
 import { cn } from '@/lib/utils'
 
@@ -19,30 +21,38 @@ type Tab = 'morning' | 'evening'
 export default function DailyPage() {
   const [tab, setTab] = useState<Tab>('morning')
   const [entry, setEntry] = useState<DailyEntry | null>(null)
+  const toast = useToast()
 
   useEffect(() => {
     async function load() {
-      const today = todayISO()
-      const existing = await dailyStorage.getByDate(today)
-      if (existing) {
-        setEntry(existing)
-        if (existing.morning) setTab('evening')
-      } else {
-        const newEntry: DailyEntry = {
-          id: generateId(),
-          date: today,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
+      try {
+        const today = todayISO()
+        const existing = await dailyStorage.getByDate(today)
+        if (existing) {
+          setEntry(existing)
+          if (existing.morning) setTab('evening')
+        } else {
+          setEntry({
+            id: generateId(),
+            date: today,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          })
         }
-        setEntry(newEntry)
+      } catch (err) {
+        toast.error("Couldn't load today's entry", parseError(err))
       }
     }
     load()
   }, [])
 
   const handleEntryUpdate = async (updated: DailyEntry) => {
-    await dailyStorage.save(updated)
-    setEntry(updated)
+    try {
+      await dailyStorage.save(updated)
+      setEntry(updated)
+    } catch (err) {
+      toast.error('Failed to save', parseError(err))
+    }
   }
 
   const hasMorning = !!entry?.morning

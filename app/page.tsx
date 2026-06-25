@@ -19,6 +19,8 @@ import { PillarRadar } from '@/components/dashboard/PillarRadar'
 import { AIInsights } from '@/components/dashboard/AIInsights'
 
 import { dailyStorage, goalStorage, decisionStorage } from '@/lib/storage'
+import { useToast } from '@/lib/hooks/useToast'
+import { parseError } from '@/lib/utils/errors'
 import { computeStreak, rollingAverage } from '@/lib/scoring/daily'
 import { computePillarScores } from '@/lib/scoring/weekly'
 import {
@@ -48,36 +50,41 @@ export default function DashboardPage() {
   const [hasMorning, setHasMorning] = useState(false)
   const [hasEvening, setHasEvening] = useState(false)
   const [top3, setTop3] = useState<string[]>([])
+  const toast = useToast()
 
   useEffect(() => {
     async function load() {
-      const today = todayISO()
-      const { start, end } = getWeekRange()
+      try {
+        const today = todayISO()
+        const { start, end } = getWeekRange()
 
-      const allEntries = await dailyStorage.getAll()
-      const todayEntry = allEntries.find((e) => e.date === today)
-      const weekEntries = allEntries.filter((e) => e.date >= start && e.date <= end)
+        const allEntries = await dailyStorage.getAll()
+        const todayEntry = allEntries.find((e) => e.date === today)
+        const weekEntries = allEntries.filter((e) => e.date >= start && e.date <= end)
 
-      setTodayScore(todayEntry?.alignmentScore ?? 0)
-      setHasMorning(!!todayEntry?.morning)
-      setHasEvening(!!todayEntry?.evening)
-      setTop3(todayEntry?.morning?.top3Priorities ?? [])
+        setTodayScore(todayEntry?.alignmentScore ?? 0)
+        setHasMorning(!!todayEntry?.morning)
+        setHasEvening(!!todayEntry?.evening)
+        setTop3(todayEntry?.morning?.top3Priorities ?? [])
 
-      const weekScores = weekEntries
-        .map((e) => e.alignmentScore)
-        .filter((s): s is number => s !== undefined)
-      setWeeklyAvg(rollingAverage(weekScores))
+        const weekScores = weekEntries
+          .map((e) => e.alignmentScore)
+          .filter((s): s is number => s !== undefined)
+        setWeeklyAvg(rollingAverage(weekScores))
 
-      setStreak(computeStreak(allEntries))
-      setPillarScores(computePillarScores(weekEntries))
+        setStreak(computeStreak(allEntries))
+        setPillarScores(computePillarScores(weekEntries))
 
-      const goals = await goalStorage.getAll()
-      setActiveGoals(goals.filter((g) => g.status === 'active').slice(0, 5))
+        const goals = await goalStorage.getAll()
+        setActiveGoals(goals.filter((g) => g.status === 'active').slice(0, 5))
 
-      const decisions = await decisionStorage.getAll()
-      setRecentDecisions(
-        [...decisions].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 4)
-      )
+        const decisions = await decisionStorage.getAll()
+        setRecentDecisions(
+          [...decisions].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 4)
+        )
+      } catch (err) {
+        toast.error('Failed to load dashboard', parseError(err))
+      }
     }
     load()
   }, [])

@@ -7,6 +7,8 @@ import Link from 'next/link'
 import { ContactForm } from '@/components/crm/ContactForm'
 import { InteractionForm } from '@/components/crm/InteractionForm'
 import { contactStorage, interactionStorage } from '@/lib/storage'
+import { useToast } from '@/lib/hooks/useToast'
+import { parseError } from '@/lib/utils/errors'
 import {
   computeRelationshipHealth,
   daysUntilDue,
@@ -26,41 +28,59 @@ export default function ContactPage() {
   const [interactions, setInteractions] = useState<Interaction[]>([])
   const [editing, setEditing] = useState(false)
   const [showLog, setShowLog] = useState(false)
+  const toast = useToast()
 
   const load = async () => {
-    const [c, ints] = await Promise.all([
-      contactStorage.getById(id),
-      interactionStorage.getByContact(id),
-    ])
-    if (!c) { router.push('/crm'); return }
-    setContact(c)
-    setInteractions(ints)
+    try {
+      const [c, ints] = await Promise.all([
+        contactStorage.getById(id),
+        interactionStorage.getByContact(id),
+      ])
+      if (!c) { router.push('/crm'); return }
+      setContact(c)
+      setInteractions(ints)
+    } catch (err) {
+      toast.error('Failed to load contact', parseError(err))
+    }
   }
 
   useEffect(() => { load() }, [id])
 
   const handleSaveContact = async (updated: Contact) => {
-    await contactStorage.save(updated)
-    setContact(updated)
-    setEditing(false)
+    try {
+      await contactStorage.save(updated)
+      setContact(updated)
+      setEditing(false)
+      toast.success('Contact updated')
+    } catch (err) {
+      toast.error('Failed to save contact', parseError(err))
+    }
   }
 
   const handleLogInteraction = async (i: Interaction) => {
-    await interactionStorage.save(i)
-    // Update contact's lastContactDate to today
-    if (contact && i.date >= (contact.lastContactDate || '')) {
-      const updated = { ...contact, lastContactDate: i.date, updatedAt: new Date().toISOString() }
-      await contactStorage.save(updated)
-      setContact(updated)
+    try {
+      await interactionStorage.save(i)
+      if (contact && i.date >= (contact.lastContactDate || '')) {
+        const updated = { ...contact, lastContactDate: i.date, updatedAt: new Date().toISOString() }
+        await contactStorage.save(updated)
+        setContact(updated)
+      }
+      setShowLog(false)
+      load()
+      toast.success('Interaction logged')
+    } catch (err) {
+      toast.error('Failed to log interaction', parseError(err))
     }
-    setShowLog(false)
-    load()
   }
 
   const handleDeleteInteraction = async (iid: string) => {
     if (!confirm('Delete this interaction?')) return
-    await interactionStorage.delete(iid)
-    load()
+    try {
+      await interactionStorage.delete(iid)
+      load()
+    } catch (err) {
+      toast.error('Failed to delete interaction', parseError(err))
+    }
   }
 
   if (!contact) {

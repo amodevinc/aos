@@ -6,6 +6,8 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { GoalForm } from '@/components/goals/GoalForm'
 import { goalStorage, projectStorage } from '@/lib/storage'
 import { PILLAR_META, PILLARS, formatDate, generateId, cn } from '@/lib/utils'
+import { useToast } from '@/lib/hooks/useToast'
+import { parseError } from '@/lib/utils/errors'
 import type { Goal, Project, Pillar, GoalStatus } from '@/types'
 
 const STATUS_META: Record<GoalStatus, { label: string; color: string }> = {
@@ -23,7 +25,15 @@ export default function GoalsPage() {
   const [filterPillar, setFilterPillar] = useState<Pillar | 'all'>('all')
   const [filterStatus, setFilterStatus] = useState<GoalStatus | 'all'>('all')
 
-  const load = async () => setGoals(await goalStorage.getAll())
+  const toast = useToast()
+
+  const load = async () => {
+    try {
+      setGoals(await goalStorage.getAll())
+    } catch (err) {
+      toast.error('Failed to load goals', parseError(err))
+    }
+  }
   useEffect(() => { load() }, [])
 
   const filtered = goals
@@ -32,22 +42,35 @@ export default function GoalsPage() {
     .sort((a, b) => a.status.localeCompare(b.status) || b.updatedAt.localeCompare(a.updatedAt))
 
   const handleSave = async (goal: Goal) => {
-    await goalStorage.save(goal)
-    load()
-    setShowForm(false)
-    setEditingGoal(null)
+    try {
+      await goalStorage.save(goal)
+      load()
+      setShowForm(false)
+      setEditingGoal(null)
+      toast.success('Goal saved')
+    } catch (err) {
+      toast.error('Failed to save goal', parseError(err))
+    }
   }
 
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this goal?')) return
-    await goalStorage.delete(id)
-    load()
+    try {
+      await goalStorage.delete(id)
+      load()
+    } catch (err) {
+      toast.error('Failed to delete goal', parseError(err))
+    }
   }
 
   const handleProgressChange = async (goal: Goal, progress: number) => {
-    const updated = { ...goal, progress, updatedAt: new Date().toISOString() }
-    await goalStorage.save(updated)
-    load()
+    try {
+      const updated = { ...goal, progress, updatedAt: new Date().toISOString() }
+      await goalStorage.save(updated)
+      load()
+    } catch (err) {
+      toast.error('Failed to update progress', parseError(err))
+    }
   }
 
   return (

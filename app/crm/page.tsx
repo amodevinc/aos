@@ -8,6 +8,8 @@ import { ContactCard } from '@/components/crm/ContactCard'
 import { ContactForm } from '@/components/crm/ContactForm'
 import { TouchQueue } from '@/components/crm/TouchQueue'
 import { contactStorage } from '@/lib/storage'
+import { useToast } from '@/lib/hooks/useToast'
+import { parseError } from '@/lib/utils/errors'
 import {
   networkHealthScore,
   getTouchQueue,
@@ -28,7 +30,15 @@ export default function CRMPage() {
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all')
   const [filterPillar, setFilterPillar] = useState<Pillar | 'all'>('all')
 
-  const load = async () => setContacts(await contactStorage.getAll())
+  const toast = useToast()
+
+  const load = async () => {
+    try {
+      setContacts(await contactStorage.getAll())
+    } catch (err) {
+      toast.error('Failed to load contacts', parseError(err))
+    }
+  }
   useEffect(() => { load() }, [])
 
   const touchQueue = getTouchQueue(contacts)
@@ -53,14 +63,23 @@ export default function CRMPage() {
   })
 
   const handleSave = async (c: Contact) => {
-    await contactStorage.save(c)
-    load()
-    setShowForm(false)
+    try {
+      await contactStorage.save(c)
+      load()
+      setShowForm(false)
+      toast.success('Contact saved')
+    } catch (err) {
+      toast.error('Failed to save contact', parseError(err))
+    }
   }
 
   const handleDelete = async (id: string) => {
-    await contactStorage.delete(id)
-    load()
+    try {
+      await contactStorage.delete(id)
+      load()
+    } catch (err) {
+      toast.error('Failed to delete contact', parseError(err))
+    }
   }
 
   return (

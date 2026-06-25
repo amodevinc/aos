@@ -175,3 +175,55 @@ ALTER TABLE interactions ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "own_interactions" ON interactions FOR ALL USING (auth.uid() = user_id);
 CREATE INDEX interactions_contact ON interactions(contact_id);
 CREATE INDEX interactions_user_date ON interactions(user_id, date);
+
+-- ─── Capture Sessions (agentic voice capture audit log) ──────────────────────
+CREATE TABLE capture_sessions (
+  id          TEXT PRIMARY KEY,
+  user_id     UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  transcript  TEXT NOT NULL,
+  actions     JSONB NOT NULL DEFAULT '[]',
+  status      TEXT DEFAULT 'applied',   -- applied | undone | failed
+  summary     TEXT DEFAULT '',
+  metadata    JSONB DEFAULT '{}',       -- ObservabilityMetadata: tokens, latency, evaluator corrections, domains
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+-- If adding to an existing table: ALTER TABLE capture_sessions ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}';
+ALTER TABLE capture_sessions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "own_capture_sessions" ON capture_sessions FOR ALL USING (auth.uid() = user_id);
+CREATE INDEX capture_sessions_user_date ON capture_sessions(user_id, created_at DESC);
+
+-- ─── Coach Conversations ──────────────────────────────────────────────────────
+-- One active conversation per user. Messages stored as JSONB.
+CREATE TABLE coach_conversations (
+  id          UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id     UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL UNIQUE,
+  messages    JSONB NOT NULL DEFAULT '[]',
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ DEFAULT NOW()
+);
+ALTER TABLE coach_conversations ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "own_conversation" ON coach_conversations FOR ALL USING (auth.uid() = user_id);
+
+-- ─── CLI device tokens (terminal / MCP access) ─────────────────────────────────
+CREATE TABLE cli_tokens (
+  id            UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id       UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  token_hash    TEXT NOT NULL UNIQUE,
+  device_label  TEXT DEFAULT 'Terminal',
+  last_used_at  TIMESTAMPTZ,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+ALTER TABLE cli_tokens ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "own_cli_tokens" ON cli_tokens FOR ALL USING (auth.uid() = user_id);
+
+CREATE TABLE cli_setup_sessions (
+  code              TEXT PRIMARY KEY,
+  user_id           UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  token_plaintext   TEXT,
+  expires_at        TIMESTAMPTZ NOT NULL,
+  consumed_at       TIMESTAMPTZ,
+  created_at        TIMESTAMPTZ DEFAULT NOW()
+);
+-- Setup sessions are managed by API routes via service role (short-lived pairing codes).
+ALTER TABLE cli_setup_sessions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "no_direct_cli_setup" ON cli_setup_sessions FOR ALL USING (false);

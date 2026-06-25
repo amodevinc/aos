@@ -1,36 +1,76 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# AOS — Alain Operating System
 
-## Getting Started
+Personal life operating system backed by Supabase. Web for daily capture; terminal + Claude Code for deep work with live context.
 
-First, run the development server:
+**Production:** [https://life-system-rho.vercel.app](https://life-system-rho.vercel.app)
+
+## One command setup
+
+From the project directory:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run aos:install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+This will:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. Open the browser to authorize your Mac (while logged into AOS)
+2. Sync `~/vault/aos/` from live data
+3. Install background sync (macOS, every 15 min)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Then add MCP to Claude Code — see [mcp/aos-server/README.md](mcp/aos-server/README.md).
 
-## Learn More
+```bash
+npm run aos:status    # connected? last sync? background running?
+npm run mcp:aos         # MCP server for Claude Code
+```
 
-To learn more about Next.js, take a look at the following resources:
+## Daily use
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+| What | How |
+|------|-----|
+| Quick capture, coach, CRM | Web app (phone or browser) |
+| Deep thinking, synthesis | Claude Code + MCP (`get_context`, `capture`, …) |
+| Obsidian / files | `~/vault/aos/` — auto-updated by background sync |
+| Manual sync | `npm run aos:sync` |
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Architecture
 
-## Deploy on Vercel
+```
+Web app ──► Supabase ◄── /api/cli (device token)
+                ▲
+Background sync ─┘ (every 15 min)
+                │
+           ~/vault/aos/
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Local web dev
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+cp .env.local.example .env.local
+npm run dev
+```
+
+## Production / Vercel
+
+Required env vars: `NEXT_PUBLIC_SUPABASE_*`, `SUPABASE_SERVICE_ROLE_KEY`, optional `NEXT_PUBLIC_APP_URL`.
+
+Run `supabase/migrations/20250625_cli_tokens.sql` in Supabase if not already applied.
+
+See [SECURITY.md](SECURITY.md) for the full hardening checklist.
+
+```bash
+npm run env:pull
+npm run deploy:prod
+```
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `npm run aos:install` | **Start here** — authorize + sync + background daemon |
+| `npm run aos:status` | Connection, last sync, daemon status |
+| `npm run aos:sync` | Manual vault sync |
+| `npm run aos:daemon uninstall-daemon` | Remove background sync |
+| `npm run mcp:aos` | MCP server for Claude Code |

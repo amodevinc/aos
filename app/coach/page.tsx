@@ -21,6 +21,7 @@ import {
   contactStorage,
 } from '@/lib/storage'
 import { cn, generateId } from '@/lib/utils'
+import { parseError } from '@/lib/utils/errors'
 
 interface UIMessage {
   id: string
@@ -28,6 +29,10 @@ interface UIMessage {
   content: string
   streaming?: boolean
 }
+
+// Max turns sent to the API. Older turns are dropped to control token cost.
+// The system prompt always contains the full AOS context, so nothing important is lost.
+const MAX_HISTORY_TURNS = 20
 
 export default function CoachPage() {
   const [messages, setMessages] = useState<UIMessage[]>([])
@@ -37,29 +42,55 @@ export default function CoachPage() {
   const [hasKey, setHasKey] = useState(false)
   const [keyInput, setKeyInput] = useState('')
   const [error, setError] = useState('')
+  // System prompt is built once per session and cached — not rebuilt on every message
+  const systemPromptRef = useRef<string>('')
   const bottomRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const abortRef = useRef<AbortController | null>(null)
 
-  // Load key + restore conversation
+  // Load key + restore conversation + build system prompt once
   useEffect(() => {
     const key = apiKeyStorage.get()
     if (key) {
       setApiKey(key)
       setHasKey(true)
     }
-    const conv = conversationStorage.get()
-    if (conv?.messages) {
-      const uiMessages: UIMessage[] = conv.messages.map((m) => ({
-        id: generateId(),
-        role: m.role as 'user' | 'assistant',
-        content: Array.isArray(m.content)
-          ? m.content.map((b: { type: string; text?: string }) => b.type === 'text' ? b.text ?? '' : '').join('')
-          : (m.content as string),
-      }))
-      setMessages(uiMessages)
+
+    async function init() {
+      const savedMessages = await conversationStorage.get()
+      if (savedMessages.length > 0) {
+        const uiMessages: UIMessage[] = savedMessages.map((m) => ({
+          id: generateId(),
+          role: m.role as 'user' | 'assistant',
+          content: Array.isArray(m.content)
+            ? m.content.map((b: { type: string; text?: string }) => b.type === 'text' ? b.text ?? '' : '').join('')
+            : (m.content as string),
+        }))
+        setMessages(uiMessages)
+      }
     }
+    init()
+
+    // Pre-build the system prompt so the first message isn't delayed by 6 Supabase queries
+    buildSystemPromptOnce()
   }, [])
+
+  const buildSystemPromptOnce = async () => {
+    try {
+      const [allEntries, goals, decisions, weeklyReviews, contacts, compass] = await Promise.all([
+        dailyStorage.getAll(),
+        goalStorage.getAll(),
+        decisionStorage.getAll(),
+        weeklyStorage.getAll(),
+        contactStorage.getAll(),
+        compassStorage.get(),
+      ])
+      const context = buildAOSContext({ allEntries, goals, decisions, weeklyReviews, contacts, compass })
+      systemPromptRef.current = COACH_SYSTEM_PROMPT(context)
+    } catch {
+      // Non-fatal — will try again on first send
+    }
+  }
 
   // Auto-scroll
   useEffect(() => {
@@ -86,17 +117,17 @@ export default function CoachPage() {
     setError('')
   }
 
-  const buildSystemPrompt = async (): Promise<string> => {
-    const [allEntries, goals, decisions, weeklyReviews, contacts, compass] = await Promise.all([
-      dailyStorage.getAll(),
-      goalStorage.getAll(),
-      decisionStorage.getAll(),
-      weeklyStorage.getAll(),
-      contactStorage.getAll(),
-      compassStorage.get(),
-    ])
-    const context = buildAOSContext({ allEntries, goals, decisions, weeklyReviews, contacts, compass })
-    return COACH_SYSTEM_PROMPT(context)
+  // Returns cached system prompt, rebuilding from Supabase only if not yet loaded
+  const getSystemPrompt = async (): Promise<string> => {
+    if (systemPromptRef.current) return systemPromptRef.current
+    await buildSystemPromptOnce()
+    return systemPromptRef.current
+  }
+
+  const failSend = (assistantId: string, msg: string) => {
+    setError(msg)
+    setStreaming(false)
+    setMessages((prev) => prev.filter((m) => m.id !== assistantId))
   }
 
   const send = async (text: string) => {
@@ -111,21 +142,29 @@ export default function CoachPage() {
     setMessages((prev) => [...prev, userMsg, assistantMsg])
     setStreaming(true)
 
-    // Build message history for the API
+    // Limit history to the last N turns — older turns are dropped to control token cost.
+    // The system prompt always has the full AOS context so nothing important is lost.
+    const historyMessages = messages.slice(-MAX_HISTORY_TURNS)
     const history: MessageParam[] = [
-      ...messages.map((m) => ({
-        role: m.role,
-        content: m.content,
-      })),
+      ...historyMessages.map((m) => ({ role: m.role, content: m.content })),
       { role: 'user', content: text },
     ]
 
     let fullResponse = ''
 
+    // Get cached system prompt — only hits Supabase if not yet loaded
+    let system: string
+    try {
+      system = await getSystemPrompt()
+    } catch (err) {
+      failSend(assistantId, parseError(err))
+      return
+    }
+
     abortRef.current = await streamAI({
       apiKey,
       messages: history,
-      system: await buildSystemPrompt(),
+      system,
       onChunk: (chunk) => {
         fullResponse += chunk
         setMessages((prev) =>
@@ -135,6 +174,12 @@ export default function CoachPage() {
         )
       },
       onDone: (full) => {
+        // Empty response means the server stream failed mid-flight
+        if (!full.trim()) {
+          failSend(assistantId, 'No response received. Check your API key in Settings.')
+          return
+        }
+
         setMessages((prev) =>
           prev.map((m) =>
             m.id === assistantId ? { ...m, content: full, streaming: false } : m
@@ -142,22 +187,15 @@ export default function CoachPage() {
         )
         setStreaming(false)
 
-        // Persist conversation
         const allMessages: MessageParam[] = [
           ...history,
           { role: 'assistant', content: full },
         ]
-        conversationStorage.save({
-          id: generateId(),
-          messages: allMessages,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        })
+        // Save to Supabase — syncs across devices
+        conversationStorage.save(allMessages)
       },
       onError: (err) => {
-        setError(err)
-        setStreaming(false)
-        setMessages((prev) => prev.filter((m) => m.id !== assistantId))
+        failSend(assistantId, err)
       },
     })
   }
@@ -174,6 +212,9 @@ export default function CoachPage() {
     setMessages([])
     abortRef.current?.abort()
     setStreaming(false)
+    // Rebuild system prompt with fresh data for the new conversation
+    systemPromptRef.current = ''
+    buildSystemPromptOnce()
   }
 
   // ─── No API key — show setup screen ───────────────────────────────────────
