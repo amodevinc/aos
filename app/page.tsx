@@ -19,6 +19,8 @@ import { PillarRadar } from '@/components/dashboard/PillarRadar'
 import { AIInsights } from '@/components/dashboard/AIInsights'
 
 import { dailyStorage, goalStorage, decisionStorage } from '@/lib/storage'
+import { captureSessionStorage } from '@/lib/agent/storage'
+import { DashboardCaptureHero } from '@/components/capture/DashboardCaptureHero'
 import { useToast } from '@/lib/hooks/useToast'
 import { parseError } from '@/lib/utils/errors'
 import { computeStreak, rollingAverage } from '@/lib/scoring/daily'
@@ -49,6 +51,7 @@ export default function DashboardPage() {
   const [recentDecisions, setRecentDecisions] = useState<Decision[]>([])
   const [hasMorning, setHasMorning] = useState(false)
   const [hasEvening, setHasEvening] = useState(false)
+  const [captureCountToday, setCaptureCountToday] = useState(0)
   const [top3, setTop3] = useState<string[]>([])
   const toast = useToast()
 
@@ -82,6 +85,16 @@ export default function DashboardPage() {
         setRecentDecisions(
           [...decisions].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 4)
         )
+
+        try {
+          const today = todayISO()
+          const sessions = await captureSessionStorage.getRecent(20)
+          setCaptureCountToday(
+            sessions.filter((s) => s.createdAt.startsWith(today) && s.status === 'applied').length
+          )
+        } catch {
+          // Non-fatal
+        }
       } catch (err) {
         toast.error('Failed to load dashboard', parseError(err))
       }
@@ -107,6 +120,12 @@ export default function DashboardPage() {
             <ArrowRight className="h-3.5 w-3.5" />
           </Link>
         }
+      />
+
+      <DashboardCaptureHero
+        hasMorning={hasMorning}
+        hasEvening={hasEvening}
+        captureCountToday={captureCountToday}
       />
 
       {/* Alignment scores row */}

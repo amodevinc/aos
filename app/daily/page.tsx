@@ -5,11 +5,14 @@ import { format } from 'date-fns'
 import { Sun, Moon, CheckCircle2 } from 'lucide-react'
 
 import { PageHeader } from '@/components/layout/PageHeader'
+import { DailyCaptureBanner } from '@/components/capture/DailyCaptureBanner'
+import { DailyRitualStrip } from '@/components/capture/DailyRitualStrip'
 import { MorningPlanForm } from '@/components/daily/MorningPlanForm'
 import { EveningReviewForm } from '@/components/daily/EveningReviewForm'
 import { AlignmentRing } from '@/components/dashboard/AlignmentRing'
 
 import { dailyStorage } from '@/lib/storage'
+import { captureSessionStorage } from '@/lib/agent/storage'
 import { todayISO, generateId } from '@/lib/utils'
 import { useToast } from '@/lib/hooks/useToast'
 import { parseError } from '@/lib/utils/errors'
@@ -21,6 +24,7 @@ type Tab = 'morning' | 'evening'
 export default function DailyPage() {
   const [tab, setTab] = useState<Tab>('morning')
   const [entry, setEntry] = useState<DailyEntry | null>(null)
+  const [captureCountToday, setCaptureCountToday] = useState(0)
   const toast = useToast()
 
   useEffect(() => {
@@ -38,6 +42,14 @@ export default function DailyPage() {
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
           })
+        }
+        try {
+          const sessions = await captureSessionStorage.getRecent(20)
+          setCaptureCountToday(
+            sessions.filter((s) => s.createdAt.startsWith(today) && s.status === 'applied').length
+          )
+        } catch {
+          // Non-fatal
         }
       } catch (err) {
         toast.error("Couldn't load today's entry", parseError(err))
@@ -70,6 +82,17 @@ export default function DailyPage() {
           ) : undefined
         }
       />
+
+      <div className="mb-6 rounded-xl border border-[#1e1e2a] bg-[#111116] px-3 py-3">
+        <DailyRitualStrip
+          hasMorning={hasMorning}
+          hasEvening={hasEvening}
+          captureCountToday={captureCountToday}
+          className="border-t-0 pt-0"
+        />
+      </div>
+
+      <DailyCaptureBanner hasMorning={hasMorning} hasEvening={hasEvening} />
 
       {/* Tab switcher */}
       <div className="mb-6 flex gap-1 rounded-xl border border-[#1e1e2a] bg-[#111116] p-1">
